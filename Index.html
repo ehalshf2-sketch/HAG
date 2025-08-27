@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>연격 동시착탄 계산기 (HTML/JS)</title>
+  <style>
+    :root{--bg:#f7f7f7;--card:#ffffff;--text:#111827;--muted:#6b7280;--accent:#2563eb;--danger:#dc2626;--border:#e5e7eb}
+    *{box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto,Pretendard,Apple SD Gothic Neo,Noto Sans KR,Malgun Gothic,sans-serif}
+    body{margin:0;background:var(--bg);color:var(--text)}
+    .container{max-width:1100px;margin:0 auto;padding:20px}
+    h1{font-size:24px;margin:0 0 6px}
+    .sub{color:var(--muted);font-size:13px}
+    .grid{display:grid;gap:16px}
+    @media(min-width:980px){.grid{grid-template-columns:1fr 2fr}}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:16px;box-shadow:0 1px 2px rgba(0,0,0,.05)}
+    .card .content{padding:16px}
+    label{font-size:13px;color:var(--text)}
+    input,select,button{height:40px;border-radius:10px;border:1px solid var(--border);padding:0 12px;background:#fff}
+    input,select{width:100%}
+    input::placeholder{color:#9ca3af}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .muted{font-size:12px;color:var(--muted)}
+    .btn{cursor:pointer;display:inline-flex;align-items:center;gap:8px;padding:0 14px;background:#fff}
+    .btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+    .btn.warn{border-color:var(--danger);color:var(--danger)}
+    table{width:100%;border-collapse:collapse}
+    th,td{text-align:left;padding:10px}
+    thead th{color:#374151;font-weight:600}
+    tbody tr{border-top:1px solid var(--border)}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
+    .error{color:var(--danger);font-size:13px;margin-top:8px}
+    .participants header{display:grid;grid-template-columns:5fr 6fr 1fr;gap:8px;color:#6b7280;font-size:12px;margin-top:8px}
+    .participants .item{display:grid;grid-template-columns:5fr 6fr 1fr;gap:8px;margin-top:6px}
+    .right{display:flex;gap:8px;justify-content:flex-end}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>연격 동시착탄 계산기</h1>
+    <div class="sub">집결(랠리) 다중 동시 착탄을 위한 출발 시각 산출 도구 • HTML/JS 단일 파일</div>
+
+    <div class="grid" style="margin-top:16px">
+      <!-- 입력 패널 -->
+      <div class="card">
+        <div class="content">
+          <div style="font-weight:600;margin-bottom:10px">공통 설정</div>
+          <div class="row">
+            <div>
+              <label>집결 시간(분)</label>
+              <input id="rallyMinutes" placeholder="5" value="5" />
+            </div>
+            <div>
+              <label>목표 착탄(HH:MM:SS) · 비우면 모드A</label>
+              <input id="targetHit" placeholder="예: 13:30:00" />
+            </div>
+          </div>
+
+          <div id="modeABox" style="margin-top:12px">
+            <div style="font-weight:600;margin:6px 0">모드A 기준 설정</div>
+            <div class="row">
+              <div>
+                <label>기준 참가자</label>
+                <select id="referenceSelect"></select>
+              </div>
+              <div>
+                <label>기준 출발 시각(HH:MM:SS)</label>
+                <input id="referenceStart" placeholder="예: 13:00:00" />
+              </div>
+            </div>
+            <div class="muted" style="margin-top:8px">* 모드A는 <b>기준 출발시각 + (기준 이동 − 개인 이동)</b>으로 동기화합니다. 보통 가장 느린 사람을 기준으로 권장.</div>
+          </div>
+
+          <div style="margin-top:16px;font-weight:600">참가자 목록</div>
+          <div class="participants">
+            <header>
+              <div>이름</div>
+              <div>이동시간(초 / MM:SS / HH:MM:SS)</div>
+              <div style="text-align:right">삭제</div>
+            </header>
+            <div id="list"></div>
+          </div>
+          <div style="margin-top:8px" class="right">
+            <button class="btn" id="addBtn">+ 참가자 추가</button>
+          </div>
+          <div id="error" class="error" style="display:none"></div>
+        </div>
+      </div>
+
+      <!-- 결과 패널 -->
+      <div class="card">
+        <div class="content">
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <div>
+              <div class="muted">계산 모드</div>
+              <div id="modeTitle" style="font-weight:700;margin-top:2px">모드A · 도착 시간 차이 기반</div>
+            </div>
+            <div class="right">
+              <button class="btn" id="copyBtn">지시안 복사</button>
+            </div>
+          </div>
+
+          <div style="overflow-x:auto;margin-top:12px">
+            <table>
+              <thead>
+                <tr>
+                  <th>이름</th>
+                  <th>이동(초)</th>
+                  <th>출발 시각</th>
+                  <th>지시 예시</th>
+                </tr>
+              </thead>
+              <tbody id="tbody"></tbody>
+            </table>
+          </div>
+
+          <div class="muted" style="margin-top:12px">
+            · 모드B(착탄 시각 기준): <b>출발 = 목표착탄 − 집결(분) − 이동시간</b><br/>
+            · 모드A(도착 시간 차이): <b>출발 = 기준출발 + (기준이동 − 개인이동)</b> · 가장 느린 참가자를 기준 추천<br/>
+            · 시간은 24시간 형식(HH:MM:SS). 날짜 넘어감(음수/다음날)은 운영자가 맥락판단 바랍니다.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ---------- 유틸 ----------
+    const pad = (n, w=2) => String(n).padStart(w, '0');
+    const nowHMS = () => { const d=new Date(); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}` }
+    const isTime = (s) => /^\\d{1,2}:\\d{2}:\\d{2}$/.test((s||'').trim());
+    const parseHMS = (hms) => { const [h,m,s]=hms.split(':').map(Number); return h*3600+m*60+s };
+    const fmtHMS = (t) => { if(!isFinite(t)) return '--:--:--'; const sign=t<0?'-':''; const v=Math.abs(Math.round(t)); const h=Math.floor(v/3600), m=Math.floor((v%3600)/60), s=v%60; return `${sign}${pad(h)}:${pad(m)}:${pad(s)}` };
+    function parseTravel(input){
+      const s=(input||'').trim();
+      if(/^\\d+$/.test(s)) return Number(s);
+      if(/^\\d{1,2}:\\d{2}$/.test(s)){ const [mm,ss]=s.split(':').map(Number); return mm*60+ss; }
+      if(isTime(s)) return parseHMS(s);
+      return NaN;
+    }
+
+    // ---------- 상태 ----------
+    const state = {
+      rallyMinutes: 5,
+      targetHit: '',
+      referenceId: '',
+      referenceStart: nowHMS(),
+      participants: [
+        {id: crypto.randomUUID(), name:'자루코', travel:'20'},
+        {id: crypto.randomUUID(), name:'다우드', travel:'16'},
+      ],
+    };
+
+    // ---------- DOM ----------
+    const rallyMinutesEl = document.getElementById('rallyMinutes');
+    const targetHitEl = document.getElementById('targetHit');
+    const referenceSelectEl = document.getElementById('referenceSelect');
+    const referenceStartEl = document.getElementById('referenceStart');
+    const listEl = document.getElementById('list');
+    const tbodyEl = document.getElementById('tbody');
+    const modeTitleEl = document.getElementById('modeTitle');
+    const errorEl = document.getElementById('error');
+    const modeABox = document.getElementById('modeABox');
+
+    // ---------- 렌더 ----------
+    function renderParticipants(){
+      referenceSelectEl.innerHTML = '';
+      state.participants.forEach(p=>{
+        const opt=document.createElement('option');
+        opt.value=p.id; opt.textContent=p.name||'(이름없음)';
+        referenceSelectEl.appendChild(opt);
+      });
+      if(!state.referenceId) state.referenceId = state.participants[0]?.id || '';
+      referenceSelectEl.value = state.referenceId;
+
+      listEl.innerHTML='';
+      state.participants.forEach((p)=>{
+        const row=document.createElement('div');
+        row.className='item';
+        row.innerHTML=`
+          <input value="${p.name}" placeholder="예: 자루코"/>
+          <input value="${p.travel}" placeholder="예: 20 또는 1:20 또는 00:01:20"/>
+          <div style="display:flex;justify-content:flex-end"><button class="btn warn">삭제</button></div>
+        `;
+        const [nameInput, travelInput, delBox] = row.children;
+        nameInput.addEventListener('input', (e)=>{ p.name = e.target.value; computeAndRender(); });
+        travelInput.addEventListener('input', (e)=>{ p.travel = e.target.value; computeAndRender(); });
+        delBox.firstChild.addEventListener('click', ()=>{ removeParticipant(p.id); });
+        listEl.appendChild(row);
+      });
+    }
+
+    function compute(){
+      const rallySec = Math.max(0, Math.round((Number(state.rallyMinutes)||0)*60));
+      const parsed = state.participants.map(p=>({ ...p, sec: parseTravel(p.travel) }));
+      const valid = parsed.every(p=> Number.isFinite(p.sec) && p.sec>=0);
+      if(!valid){
+        return { ok:false, error:'이동시간 입력을 확인하세요. "초" 또는 "MM:SS" 또는 "HH:MM:SS" 형식.', rows:[] };
+      }
+      const modeB = isTime(state.targetHit);
+      const rows=[];
+      if(modeB){
+        const hit = parseHMS(state.targetHit);
+        parsed.forEach(p=>{
+          const start = hit - rallySec - p.sec;
+          rows.push({ name:p.name, travel:p.sec, start, startStr: fmtHMS(start) });
+        });
+        return { ok:true, mode:'B', rows, rallySec };
+      } else {
+        const ref = parsed.find(x=>x.id===state.referenceId) || parsed[0];
+        const refStart = isTime(state.referenceStart) ? parseHMS(state.referenceStart) : parseHMS(nowHMS());
+        parsed.forEach(p=>{
+          const start = refStart + (ref.sec - p.sec);
+          rows.push({ name:p.name, travel:p.sec, start, startStr: fmtHMS(start) });
+        });
+        return { ok:true, mode:'A', rows, ref };
+      }
+    }
+
+    function render(){
+      renderParticipants();
+      const res = compute();
+      tbodyEl.innerHTML='';
+      errorEl.style.display='none';
+
+      if(!res.ok){
+        errorEl.textContent = res.error;
+        errorEl.style.display='block';
+        modeTitleEl.textContent = '—';
+        return;
+      }
+
+      const modeText = res.mode==='B' ? '모드B · 착탄 시각 기준 역산' : '모드A · 도착 시간 차이 기반';
+      modeTitleEl.textContent = modeText;
+      modeABox.style.display = (res.mode==='B') ? 'none' : 'block';
+
+      res.rows.forEach(r=>{
+        const tr=document.createElement('tr');
+        tr.innerHTML = `
+          <td>${r.name}</td>
+          <td>${r.travel}</td>
+          <td class="mono">${r.startStr}</td>
+          <td class="mono">${r.name} ${r.startStr} 출발</td>
+        `;
+        tbodyEl.appendChild(tr);
+      });
+    }
+
+    function computeAndRender(){ render(); }
+
+    function addParticipant(){
+      state.participants.push({ id: crypto.randomUUID(), name: `참가자${state.participants.length+1}`, travel:'' });
+      render();
+    }
+
+    function removeParticipant(id){
+      state.participants = state.participants.filter(p=>p.id!==id);
+      if(state.referenceId===id){ state.referenceId = state.participants[0]?.id || ''; }
+      render();
+    }
+
+    document.getElementById('addBtn').addEventListener('click', addParticipant);
+    rallyMinutesEl.addEventListener('input', (e)=>{ state.rallyMinutes = e.target.value; computeAndRender(); });
+    targetHitEl.addEventListener('input', (e)=>{ state.targetHit = e.target.value; computeAndRender(); });
+    referenceSelectEl.addEventListener('change', (e)=>{ state.referenceId = e.target.value; computeAndRender(); });
+    referenceStartEl.value = state.referenceStart;
+    referenceStartEl.addEventListener('input', (e)=>{ state.referenceStart = e.target.value; computeAndRender(); });
+
+    document.getElementById('copyBtn').addEventListener('click', ()=>{
+      const res = compute();
+      if(!res.ok) return;
+      const lines=[];
+      if(res.mode==='B'){
+        lines.push(`목표 착탄: ${state.targetHit} / 집결 ${Math.round((Number(state.rallyMinutes)||0))}분`);
+      } else {
+        lines.push(`기준: ${(res.ref&&res.ref.name)||'—'} ${state.referenceStart} 출발(이동 ${(res.ref&&res.ref.sec)||0}s)`);
+      }
+      lines.push('');
+      res.rows.forEach(r=>lines.push(`${r.name} → ${r.startStr} 출발 (이동 ${r.travel}s)`));
+      navigator.clipboard.writeText(lines.join('\\n'));
+      alert('지시안을 클립보드에 복사했습니다.');
+    });
+
+    render();
+  </script>
+</body>
+</html>
