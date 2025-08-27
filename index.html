@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>連撃同時着弾計算機</title>
+<style>
+:root{--bg:#f7f7f7;--card:#fff;--border:#e5e7eb;--muted:#6b7280}
+*{box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto,Pretendard,Noto Sans JP,Noto Sans KR,sans-serif}
+body{margin:0;background:var(--bg)} .container{max-width:1100px;margin:0 auto;padding:20px}
+.card{background:#fff;border:1px solid var(--border);border-radius:16px;padding:16px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+input,select,button{height:40px;border-radius:10px;border:1px solid var(--border);padding:0 12px;background:#fff;width:100%}
+table{width:100%;border-collapse:collapse;margin-top:12px} th,td{padding:10px;text-align:left} tbody tr{border-top:1px solid var(--border)}
+.mono{font-family:ui-monospace,Menlo,Consolas,monospace} .muted{color:var(--muted);font-size:12px}
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>連撃同時着弾計算機</h1>
+  <div class="row">
+    <div class="card">
+      <div style="font-weight:600;margin-bottom:8px">共通設定</div>
+      <div class="row" style="margin-bottom:8px">
+        <div><label>集結時間（分）</label><input id="rallyMinutes" value="5"></div>
+        <div><label>目標着弾時刻（HH:MM:SS）· 空欄ならモードA</label><input id="targetHit" placeholder="例: 13:30:00"></div>
+      </div>
+      <div id="modeABox">
+        <div style="font-weight:600;margin:6px 0">モードA基準設定</div>
+        <div class="row">
+          <div><label>基準参加者</label><select id="referenceSelect"></select></div>
+          <div><label>基準出発時刻（HH:MM:SS）</label><input id="referenceStart" placeholder="例: 13:00:00"></div>
+        </div>
+        <div class="muted" style="margin-top:6px">* モードA = 基準出発 + （基準移動 − 個人移動）</div>
+      </div>
+      <div style="font-weight:600;margin-top:12px">参加者リスト</div>
+      <div id="list"></div>
+      <button id="addBtn" style="margin-top:8px">＋参加者追加</button>
+      <div id="error" style="color:#dc2626;margin-top:6px;display:none"></div>
+    </div>
+    <div class="card">
+      <div class="muted">計算モード</div>
+      <div id="modeTitle" style="font-weight:700;margin:2px 0 8px">モードA · 到着時間差基準</div>
+      <table>
+        <thead><tr><th>名前</th><th>移動（秒）</th><th>出発時刻</th><th>指示例</th></tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+      <button id="copyBtn" style="margin-top:8px">指示文をコピー</button>
+      <div class="muted" style="margin-top:8px">
+        · モードB: 出発 = 目標着弾 − 集結時間（分） − 移動時間<br>
+        · モードA: 出発 = 基準出発 + （基準移動 − 個人移動）
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+let idSeed=1; const newId=()=>String(idSeed++);
+const pad=(n)=>String(n).padStart(2,'0');
+const nowHMS=()=>{const d=new Date();return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`};
+const isTime=(s)=>/^\d{1,2}:\d{2}:\d{2}$/.test((s||'').trim());
+const parseHMS=(t)=>{const [h,m,s]=t.split(':').map(Number);return h*3600+m*60+s};
+const fmtHMS=(t)=>{if(!isFinite(t))return'--:--:--';const sign=t<0?'-':'';t=Math.abs(Math.round(t));const h=Math.floor(t/3600),m=Math.floor((t%3600)/60),s=t%60;return `${sign}${pad(h)}:${pad(m)}:${pad(s)}`};
+function parseTravel(s){s=(s||'').trim();if(/^\d+$/.test(s))return Number(s);if(/^\d{1,2}:\d{2}$/.test(s)){let[mm,ss]=s.split(':').map(Number);return mm*60+ss}if(isTime(s))return parseHMS(s);return NaN}
+
+const state={rallyMinutes:5,targetHit:'',referenceId:'',referenceStart:nowHMS(),
+  participants:[{id:newId(),name:'ザルコ',travel:'20'},{id:newId(),name:'ダウド',travel:'16'}]};
+
+const rallyMinutesEl=document.getElementById('rallyMinutes');
+const targetHitEl=document.getElementById('targetHit');
+const referenceSelectEl=document.getElementById('referenceSelect');
+const referenceStartEl=document.getElementById('referenceStart');
+const listEl=document.getElementById('list');
+const tbodyEl=document.getElementById('tbody');
+const modeTitleEl=document.getElementById('modeTitle');
+const errorEl=document.getElementById('error');
+const modeABox=document.getElementById('modeABox');
+
+function renderParticipants(){
+  referenceSelectEl.innerHTML='';
+  state.participants.forEach(p=>{
+    const opt=document.createElement('option'); opt.value=p.id; opt.textContent=p.name||'(名前なし)'; referenceSelectEl.appendChild(opt);
+  });
+  if(!state.referenceId) state.referenceId=state.participants[0]?.id||'';
+  referenceSelectEl.value=state.referenceId;
+
+  listEl.innerHTML='';
+  state.participants.forEach(p=>{
+    const row=document.createElement('div'); row.style.display='grid'; row.style.gridTemplateColumns='5fr 6fr 1fr'; row.style.gap='8px'; row.style.marginTop='6px';
+    row.innerHTML=`<input value="${p.name}"><input value="${p.travel}" placeholder="20 または 1:20 または 00:01:20"><button>削除</button>`;
+    const [nameInput, travelInput, delBtn]=row.children;
+    nameInput.oninput=e=>{p.name=e.target.value; computeAndRender();};
+    travelInput.oninput=e=>{p.travel=e.target.value; computeAndRender();};
+    delBtn.onclick=()=>{ state.participants=state.participants.filter(x=>x.id!==p.id); if(state.referenceId===p.id){state.referenceId=state.participants[0]?.id||'';} render(); };
+    listEl.appendChild(row);
+  });
+}
+
+function compute(){
+  const rallySec=Math.max(0,Math.round((Number(state.rallyMinutes)||0)*60));
+  const parsed=state.participants.map(p=>({...p,sec:parseTravel(p.travel)}));
+  const valid=parsed.every(p=>Number.isFinite(p.sec)&&p.sec>=0);
+  if(!valid) return {ok:false,error:'移動時間の形式を確認してください。「秒」または「MM:SS」または「HH:MM:SS」',rows:[]};
+  const rows=[]; const modeB=isTime(state.targetHit);
+  if(modeB){
+    const hit=parseHMS(state.targetHit);
+    parsed.forEach(p=>{const start=hit-rallySec-p.sec; rows.push({name:p.name,travel:p.sec,startStr:fmtHMS(start)})});
+    return {ok:true,mode:'B',rows};
+  }else{
+    const ref=parsed.find(x=>x.id===state.referenceId)||parsed[0];
+    const refStart=isTime(state.referenceStart)?parseHMS(state.referenceStart):parseHMS(nowHMS());
+    parsed.forEach(p=>{const start=refStart+(ref.sec-p.sec); rows.push({name:p.name,travel:p.sec,startStr:fmtHMS(start)})});
+    return {ok:true,mode:'A',rows};
+  }
+}
+
+function render(){
+  renderParticipants(); const res=compute(); tbodyEl.innerHTML=''; errorEl.style.display='none';
+  if(!res.ok){ errorEl.textContent=res.error; errorEl.style.display='block'; modeTitleEl.textContent='—'; return; }
+  modeTitleEl.textContent = res.mode==='B' ? 'モードB · 着弾時刻基準逆算' : 'モードA · 到着時間差基準';
+  modeABox.style.display = res.mode==='B' ? 'none' : 'block';
+  res.rows.forEach(r=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${r.name}</td><td>${r.travel}</td><td class="mono">${r.startStr}</td><td class="mono">${r.name} ${r.startStr} 出発</td>`; tbodyEl.appendChild(tr); });
+}
+
+function computeAndRender(){ render(); }
+
+document.getElementById('addBtn').onclick=()=>{ state.participants.push({id:newId(),name:`参加者${state.participants.length+1}`,travel:''}); render(); };
+document.getElementById('copyBtn').onclick=()=>{ const res=compute(); if(!res.ok) return; const lines=[]; if(res.mode==='B'){ lines.push(`目標着弾: ${state.targetHit} / 集結 ${Math.round((Number(state.rallyMinutes)||0))}分`);} else { lines.push(`基準: ${(referenceSelectEl.options[referenceSelectEl.selectedIndex]?.text||'—')} ${state.referenceStart} 出発`);} lines.push(''); res.rows.forEach(r=>lines.push(`${r.name} → ${r.startStr} 出発 (移動 ${r.travel}秒)`)); navigator.clipboard.writeText(lines.join('\\n')); alert('指示文をコピーしました。'); };
+
+rallyMinutesEl.oninput=e=>{state.rallyMinutes=e.target.value; computeAndRender();};
+targetHitEl.oninput=e=>{state.targetHit=e.target.value; computeAndRender();};
+referenceSelectEl.onchange=e=>{state.referenceId=e.target.value; computeAndRender();};
+referenceStartEl.value=state.referenceStart;
+referenceStartEl.oninput=e=>{state.referenceStart=e.target.value; computeAndRender();};
+
+render();
+</script>
+</body>
+</html>
